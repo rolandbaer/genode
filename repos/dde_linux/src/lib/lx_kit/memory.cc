@@ -21,7 +21,7 @@
 #include <lx_kit/memory.h>
 
 
-Lx_kit::Mem_allocator::Buffer & Lx_kit::Mem_allocator::alloc_buffer(size_t size)
+Genode::Attached_dataspace & Lx_kit::Mem_allocator::alloc_dataspace(size_t size)
 {
 	Ram_dataspace_capability ds_cap;
 
@@ -31,14 +31,14 @@ Lx_kit::Mem_allocator::Buffer & Lx_kit::Mem_allocator::alloc_buffer(size_t size)
 		addr_t dma_addr = _platform.dma_addr(ds_cap);
 
 		Buffer & buffer = *new (_heap)
-			Buffer_element(_buffers, _env.rm(), ds_cap, dma_addr);
-		addr_t addr     = (addr_t)buffer.local_addr<void>();
+			Registered<Buffer>(_buffers, _env.rm(), ds_cap, dma_addr);
+		addr_t addr     = (addr_t)buffer.ds().local_addr<void>();
 
 		/* map eager by touching all pages once */
 		for (size_t sz = 0; sz < ds_size; sz += 4096) {
 			touch_read((unsigned char const volatile*)(addr + sz)); }
 
-		return buffer;
+		return buffer.ds();
 	} catch (Out_of_caps) {
 		_platform.free_dma_buffer(ds_cap);
 		throw;
@@ -70,9 +70,9 @@ void * Lx_kit::Mem_allocator::alloc(size_t size, size_t align)
 		 * and physical addresses of a multi-page allocation are always
 		 * contiguous.
 		 */
-		Buffer & buffer = alloc_buffer(max(size + 1, min_buffer_size));
+		Attached_dataspace & ds = alloc_dataspace(max(size + 1, min_buffer_size));
 
-		_mem.add_range((addr_t)buffer.local_addr<void>(), buffer.size() - 1);
+		_mem.add_range((addr_t)ds.local_addr<void>(), ds.size() - 1);
 
 		/* re-try allocation */
 		_mem.alloc_aligned(size, &out_addr, log2(align));
@@ -95,8 +95,8 @@ Genode::addr_t Lx_kit::Mem_allocator::dma_addr(void * addr)
 
 	_buffers.for_each([&] (Buffer & b) {
 		addr_t other = (addr_t)addr;
-		addr_t addr  = (addr_t)b.local_addr<void>();
-		if (addr > other || (addr+b.size()) <= other)
+		addr_t addr  = (addr_t)b.ds().local_addr<void>();
+		if (addr > other || (addr+b.ds().size()) <= other)
 			return;
 
 		/* byte offset of 'addr' from start of block */
@@ -118,13 +118,18 @@ bool Lx_kit::Mem_allocator::free(const void * ptr)
 }
 
 
-void Lx_kit::Mem_allocator::free(Buffer & buffer)
+void Lx_kit::Mem_allocator::free(Attached_dataspace * ds)
 {
+	Dataspace_capability cap = ds->cap();
+
+	Registered<Buffer> * buffer = nullptr;
 	_buffers.for_each([&] (Buffer & b) {
-		if (b.local_addr<void>() == buffer.local_addr<void>() &&
-		    b.size() == buffer.size())
-			destroy(_heap, &b);
+		if (&b.ds() == ds)
+			buffer = static_cast<Registered<Buffer>*>(&b);
 	});
+
+	destroy(_heap, buffer);
+	_platform.free_dma_buffer(static_cap_cast<Ram_dataspace>(cap));
 }
 
 

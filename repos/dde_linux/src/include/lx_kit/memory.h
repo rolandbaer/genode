@@ -29,29 +29,27 @@ namespace Lx_kit {
 
 class Lx_kit::Mem_allocator
 {
-	public:
+	private:
 
-		class Buffer : public Attached_dataspace
+		class Buffer : Interface
 		{
 			private:
 
-				addr_t const _dma_addr;
+				Attached_dataspace _ds;
+				addr_t       const _dma_addr;
 
 			public:
 
 				Buffer(Region_map         & rm,
 				       Dataspace_capability cap,
 				       addr_t               dma_addr)
-				: Attached_dataspace(rm, cap), _dma_addr(dma_addr) {}
+				: _ds(rm, cap), _dma_addr(dma_addr) {}
 
-				addr_t dma_addr() const {
-					return _dma_addr; }
+				addr_t dma_addr() const   { return _dma_addr; }
+				Attached_dataspace & ds() { return _ds;       }
 		};
 
-	private:
-
-		using Buffer_element  = Registered_no_delete<Buffer>;
-		using Buffer_registry = Registry<Buffer_element>;
+		using Buffer_registry = Registry<Registered<Buffer>>;
 
 		Env                  & _env;
 		Heap                 & _heap;
@@ -67,12 +65,13 @@ class Lx_kit::Mem_allocator
 		              Platform::Connection & platform,
 		              Cache                  cache_attr);
 
-		Buffer & alloc_buffer(size_t size);
-		void *   alloc(size_t size, size_t align);
-		addr_t   dma_addr(void * addr);
-		size_t   size(const void * ptr);
-		void     free(Buffer & buffer);
-		bool     free(const void * ptr);
+		Attached_dataspace & alloc_dataspace(size_t size);
+
+		void * alloc(size_t size, size_t align);
+		addr_t dma_addr(void * addr);
+		size_t size(const void * ptr);
+		void   free(Attached_dataspace * ds);
+		bool   free(const void * ptr);
 };
 
 #endif /* _LX_KIT__MEMORY_H_ */
