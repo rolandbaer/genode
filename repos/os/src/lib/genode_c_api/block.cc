@@ -36,7 +36,7 @@ struct genode_block_session : Rpc_object<Block::Session>
 		Block::Request       peer_req {};
 	};
 
-	Attached_dataspace     & buffer;
+	Attached_dataspace     & ds;
 	Block::Request_stream    rs;
 	Request                  requests[MAX_REQUESTS];
 
@@ -64,8 +64,6 @@ struct genode_block_session : Rpc_object<Block::Session>
 	                     Block::Session::Info      info,
 	                     Signal_context_capability cap,
 	                     size_t                    buffer_size);
-
-	~genode_block_session();
 
 	Info info() const override { return rs.info(); }
 
@@ -180,7 +178,7 @@ genode_block_request * genode_block_session::request()
 
 			r.dev_req.blk_nr  = op.block_number;
 			r.dev_req.blk_cnt = op.count;
-			r.dev_req.addr    = (void*)((addr_t)buffer.local_addr<void>()
+			r.dev_req.addr    = (void*)((addr_t)ds.local_addr<void>()
 			                            + request.offset);
 
 			ret = &r.dev_req;
@@ -217,12 +215,8 @@ genode_block_session::genode_block_session(Env                     & env,
                                            Signal_context_capability cap,
                                            size_t                    buffer_size)
 :
-	buffer(*static_cast<Attached_dataspace*>(_alloc_peer_buffer(buffer_size))),
-	rs(env.rm(), buffer.cap(), env.ep(), cap, info) { }
-
-
-genode_block_session::~genode_block_session() {
-	_free_peer_buffer(genode_attached_dataspace_ptr(buffer)); }
+	ds(*static_cast<Attached_dataspace*>(_alloc_peer_buffer(buffer_size))),
+	rs(env.rm(), ds.cap(), env.ep(), cap, info) { }
 
 
 genode_block_session * ::Root::_create_session(const char * args,
@@ -267,6 +261,10 @@ void ::Root::_destroy_session(genode_block_session * session)
 		if (si.block_session == session)
 			si.block_session = nullptr;
 	});
+
+	Attached_dataspace & ds = session->ds;
+	Genode::destroy(md_alloc(), session);
+	_free_peer_buffer(genode_attached_dataspace_ptr(ds));
 }
 
 
