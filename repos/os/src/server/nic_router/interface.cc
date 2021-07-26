@@ -43,17 +43,22 @@ using Genode::Signal_transmitter;
  ** Utilities **
  ***************/
 
-namespace Arp_pkt {
+enum {
 
-	enum {
-		ETH_HDR_SZ = sizeof(Ethernet_frame),
-		ETH_DAT_SZ = sizeof(Arp_packet) + ETH_HDR_SZ >= Ethernet_frame::MIN_SIZE ?
-		             sizeof(Arp_packet) :
-		             Ethernet_frame::MIN_SIZE - ETH_HDR_SZ,
-		ETH_CRC_SZ = sizeof(Genode::uint32_t),
-		SIZE       = ETH_HDR_SZ + ETH_DAT_SZ + ETH_CRC_SZ,
-	};
-}
+	ETHERNET_HEADER_SIZE = sizeof(Ethernet_frame),
+
+	ETHERNET_DATA_SIZE_WITH_ARP =
+		sizeof(Arp_packet) + ETHERNET_HEADER_SIZE < Ethernet_frame::MIN_SIZE ?
+			Ethernet_frame::MIN_SIZE - ETHERNET_HEADER_SIZE :
+			sizeof(Arp_packet),
+
+	ETHERNET_CRC_SIZE = sizeof(Genode::uint32_t),
+
+	ARP_PACKET_SIZE =
+		ETHERNET_HEADER_SIZE +
+		ETHERNET_DATA_SIZE_WITH_ARP +
+		ETHERNET_CRC_SIZE,
+};
 
 
 template <typename LINK_TYPE>
@@ -1278,7 +1283,7 @@ void Interface::_handle_ip(Ethernet_frame          &eth,
 void Interface::_broadcast_arp_request(Ipv4_address const &src_ip,
                                        Ipv4_address const &dst_ip)
 {
-	send(Arp_pkt::SIZE, [&] (void *pkt_base, Size_guard &size_guard) {
+	send(ARP_PACKET_SIZE, [&] (void *pkt_base, Size_guard &size_guard) {
 
 		/* write Ethernet header */
 		Ethernet_frame &eth = Ethernet_frame::construct_at(pkt_base, size_guard);
@@ -1348,7 +1353,7 @@ void Interface::_handle_arp_reply(Ethernet_frame &eth,
 void Interface::_send_arp_reply(Ethernet_frame &request_eth,
                                 Arp_packet     &request_arp)
 {
-	send(Arp_pkt::SIZE, [&] (void *reply_base, Size_guard &reply_guard) {
+	send(ARP_PACKET_SIZE, [&] (void *reply_base, Size_guard &reply_guard) {
 
 		Ethernet_frame &reply_eth {
 			Ethernet_frame::construct_at(reply_base, reply_guard) };
