@@ -1,0 +1,237 @@
+#
+# Test that the wireless lan driver provides a valid mac address
+#
+
+#
+# Restrict platforms
+#
+assert_spec x86
+
+#
+# Build
+#
+
+create_boot_directory
+import_from_depot [depot_user]/pkg/pc_wifi
+
+set build_components {
+	core init timer
+	app/pci_decode
+	drivers/acpi
+	drivers/platform
+	drivers/rtc
+	server/report_rom
+	server/dynamic_rom
+	server/nic_router
+	lib/vfs_wifi
+	lib/vfs_jitterentropy
+	lib/vfs_lwip
+}
+
+build $build_components
+
+#
+# Generate config
+#
+
+append config {
+<config verbose="yes" prio_levels="2">
+	<parent-provides>
+		<service name="ROM"/>
+		<service name="IRQ"/>
+		<service name="IO_MEM"/>
+		<service name="IO_PORT"/>
+		<service name="PD"/>
+		<service name="RM"/>
+		<service name="CPU"/>
+		<service name="LOG"/>
+	</parent-provides>
+	<default-route>
+		<any-service> <parent/> <any-child/> </any-service>
+	</default-route>
+	<default caps="100"/>
+	<start name="timer">
+		<resource name="RAM" quantum="1M"/>
+		<provides> <service name="Timer"/> </provides>
+	</start>
+
+	<start name="report_rom" caps="70">
+		<resource name="RAM" quantum="1M"/>
+		<provides>
+			<service name="ROM" />
+			<service name="Report" />
+		</provides>
+		<config verbose="yes">
+			<policy label="pci_decode -> system"    report="acpi_drv -> acpi"/>
+			<policy label="platform_drv -> devices" report="pci_decode -> devices"/>
+		</config>
+		<route>
+			<service name="LOG"> <parent/> </service>
+			<service name="PD">  <parent/> </service>
+			<service name="CPU"> <parent/> </service>
+			<service name="ROM"> <parent/> </service>
+		</route>
+	</start>
+
+	<start name="acpi_drv" caps="250">
+		<resource name="RAM" quantum="4M"/>
+		<route>
+			<service name="IO_MEM"> <parent/> </service>
+			<service name="LOG">    <parent/> </service>
+			<service name="PD">     <parent/> </service>
+			<service name="RM">     <parent/> </service>
+			<service name="CPU">    <parent/> </service>
+			<service name="ROM">    <parent/> </service>
+			<service name="Report"> <child name="report_rom"/> </service>
+		</route>
+	</start>
+
+	<start name="pci_decode" caps="350">
+		<resource name="RAM" quantum="2M"/>
+		<route>
+			<service name="Report">
+				<child name="report_rom"/> </service>
+			<service name="ROM" label="system">
+				<child name="report_rom"/> </service>
+			<service name="IO_MEM"> <parent/> </service>
+			<service name="LOG">    <parent/> </service>
+			<service name="PD">     <parent/> </service>
+			<service name="RM">     <parent/> </service>
+			<service name="CPU">    <parent/> </service>
+			<service name="ROM">    <parent/> </service>
+		</route>
+	</start>
+
+	<start name="platform_drv" caps="100" managing_system="yes">
+		<resource name="RAM" quantum="1M"/>
+		<provides> <service name="Platform"/> </provides>
+		<route>
+			<service name="ROM" label="devices"> <child name="report_rom"/> </service>
+			<service name="Timer">   <child name="timer"/> </service>
+			<service name="IRQ">     <parent/> </service>
+			<service name="IO_MEM">  <parent/> </service>
+			<service name="IO_PORT"> <parent/> </service>
+			<service name="ROM">     <parent/> </service>
+			<service name="PD">      <parent/> </service>
+			<service name="CPU">     <parent/> </service>
+			<service name="LOG">     <parent/> </service>
+		</route>
+		<config>
+			<policy label_prefix="wifi_drv" info="yes">
+				<pci class="WIFI"/>
+			</policy>
+		</config>
+	</start>
+
+	<start name="rtc_drv">
+		<resource name="RAM" quantum="1M"/>
+		<provides> <service name="Rtc"/> </provides>
+	</start>
+
+	<start name="state_report_rom">
+		<binary name="report_rom"/>
+		<resource name="RAM" quantum="2M"/>
+		<provides> <service name="Report"/> <service name="ROM"/> </provides>
+		<config verbose="no"/>
+	</start>
+
+	<start name="accesspoints_report_rom">
+		<binary name="report_rom"/>
+		<resource name="RAM" quantum="2M"/>
+		<provides> <service name="Report"/> <service name="ROM"/> </provides>
+		<config verbose="no"/>
+	</start>
+
+	<start name="config_rom">
+		<binary name="dynamic_rom"/>
+		<resource name="RAM" quantum="4M"/>
+		<provides><service name="ROM"/></provides>
+		<config verbose="yes">
+			<rom name="wifi_config">
+				<inline description="connect">
+					<wifi_config connected_scan_interval="30" scan_interval="10" rfkill="no">
+						<network ssid="Foobar" protection="WPA2" passphrase="allyourbase"/>
+					</wifi_config>
+				</inline>
+				<sleep milliseconds="60000"/>
+			</rom>
+		</config>
+	</start>
+
+	<start name="nic_router" caps="150">
+		<resource name="RAM" quantum="8M"/>
+		<provides>
+			<service name="Nic"/>
+			<service name="Uplink"/>
+		</provides>
+		<config verbose="no" verbose_domain_state="yes" dhcp_discover_timeout_sec="10" dhcp_request_timeout_sec="6">
+
+			<policy label_prefix="test-lwip_httpsrv" domain="downlink"/>
+			<policy label_prefix="wifi_drv"          domain="uplink"/>
+
+			<domain name="uplink" verbose_packets="no" verbose_packet_drop="no" icmp_echo_server="yes">
+
+				<nat domain="downlink" tcp-ports="16384"/>
+				<tcp-forward port="443" domain="downlink" to="10.0.3.2"/>
+				<tcp-forward port="80"  domain="downlink" to="10.0.3.2"/>
+
+			</domain>
+
+			<domain name="downlink" verbose_packets="no" verbose_packet_drop="no" interface="10.0.3.1/24">
+
+				<dhcp-server ip_first="10.0.3.2" ip_last="10.0.3.2"/>
+
+			</domain>
+
+		</config>
+	</start>
+
+	<start name="devices_report_rom">
+		<binary name="report_rom"/>
+		<resource name="RAM" quantum="1200K"/>
+		<provides> <service name="Report"/> <service name="ROM"/> </provides>
+		<config verbose="yes"/>
+	</start>
+
+	<start name="wifi_drv" caps="250" priority="-1">
+		<resource name="RAM" quantum="32M"/>
+		<config ld_verbose="yes">
+			<report mac_address="true"/>
+			<libc stdout="/dev/log" stderr="/dev/log" rtc="/dev/rtc" rng="/dev/urandom"/>
+			<vfs>
+				<dir name="dev"> <log/> <null/> <rtc/>
+					<jitterentropy name="random"/>
+					<jitterentropy name="urandom"/>
+					<wifi/>
+				</dir>
+				<dir name="firmware">
+					<tar name="wifi_firmware.tar"/>
+				</dir>
+			</vfs>
+		</config>
+		<route>
+			<service name="Uplink"> <child name="nic_router"/> </service>
+			<service name="Rtc"> <any-child/> </service>
+			<service name="Report" label="accesspoints"> <child name="accesspoints_report_rom"/> </service>
+			<service name="Report" label="state"> <child name="state_report_rom"/> </service>
+			<service name="Report" label="devices"> <child name="devices_report_rom"/> </service>
+			<service name="ROM" label="wifi_config"> <child name="config_rom"/> </service>
+			<service name="ROM" label="wifi.lib.so"> <parent label="pc_wifi.lib.so"/> </service>
+			<service name="ROM" label="wifi_firmware.tar"> <parent label="pc_wifi_firmware.tar"/> </service>
+			<any-service> <parent/> <any-child/> </any-service>
+		</route>
+	</start>
+</config>
+}
+
+install_config $config
+
+#
+# Boot modules
+#
+
+build_boot_image [build_artifacts]
+
+run_genode_until "<nic mac_address=\"(?!00:00:00:00:00:00)(\[0-9A-Fa-f\]{2}\[:-\]){5}(\[0-9A-Fa-f\]{2})\"\/>" 30
+
+# vi: set ft=tcl :
